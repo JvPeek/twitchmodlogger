@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8" />
+		<title>Overlay</title>
+		<script src="https://unpkg.com/twitch-js@>2.0.0-beta.41"></script>
+		<style>
+			body {
+				font-family: monospace;
+			}
+			span.username, span.description {
+				font-weight: bold;
+			}
+			span.timestamp, span.timestamp2{
+				font-size: .7em;
+			}
+		</style>
+		<script>
+		const { Chat } = window.TwitchJs;
+		let token = undefined;
+		let username = undefined;
+		let timer;
+		let audioloop = false;
+		let timerDuration;
+		let channel = "jungeuniongaming";
+		let deletedMsgs = 0;
+		let bannedUsers = 0;
+		let timeoutedUsers = 0;
+		let timeoutAverageSum = 0;
+		let Msgs= 0;
+		let msgCache = [];
+		let lastEvent;
+		
+		function countMessage(type) {
+			document.getElementById("messages").firstChild.nodeValue = Msgs;
+			document.getElementById("deleted").firstChild.nodeValue = deletedMsgs + " (" + (Msgs>0?(100/Msgs*deletedMsgs).toFixed(4):0) + "%)";
+			document.getElementById("timeout").firstChild.nodeValue = timeoutedUsers + " (" + (Msgs>0?(100/Msgs*timeoutedUsers).toFixed(4):0) + "%)  ~ " + sec2time(timeoutAverageSum/timeoutedUsers);
+			document.getElementById("banned").firstChild.nodeValue = bannedUsers + " (" + (Msgs>0?(100/Msgs*bannedUsers).toFixed(4):0) + "%)";
+		}
+		const handleMessage = (msg) => {
+			if(msg.event == "PRIVMSG") {
+				Msgs++;
+				msgCache[msg.username] = msg;
+			}
+			if (msg.event == "CLEARMSG") {
+				if(lastEvent && lastEvent.username==msg.username) return; // Doppelte Events überspringen
+				deletedMsgs++;
+				let ul = document.getElementById("messageList");
+				let template = document.querySelector('#template_clearmsg');
+				let t_content = document.importNode(template.content, true);
+				t_content.querySelector(".username").textContent = msg.username;
+				t_content.querySelector(".message").textContent = msg.message;
+				t_content.querySelector(".timestamp").textContent = "(" + msg.timestamp.toLocaleString() + ")";
+				ul.prepend(t_content);
+				lastEvent = msg;
+			}
+			if (msg.event == "USER_BANNED") {
+				if(lastEvent && lastEvent.username==msg.username) return; // Doppelte Events überspringen
+				
+				if(msg.tags.banDuration!=undefined) {
+					timeoutedUsers++;
+					timeoutAverageSum += msg.tags.banDuration;
+				} else {
+					bannedUsers++;
+				}
+
+				deletedMsgs++;
+				let ul = document.getElementById("messageList");
+				let template = document.querySelector('#template_banmsg');
+				let t_content = document.importNode(template.content, true);
+				let lastMsg = msgCache[msg.username];
+				t_content.querySelector(".username").textContent = msg.username;
+				if (msg.tags.banDuration!=undefined) {
+					t_content.querySelector(".timeout").textContent = sec2time(msg.tags.banDuration);
+				} else {
+					t_content.querySelector(".timeout").textContent = "-dauerhaft-";
+				}
+
+				t_content.querySelector(".timestamp").textContent = "(" + msg.timestamp.toLocaleString() + ")";
+				t_content.querySelector(".message").textContent = lastMsg!=undefined ? lastMsg.message : "-unbekannt-";
+				t_content.querySelector(".timestamp2").textContent = lastMsg != undefined ? "(" + lastMsg.timestamp.toLocaleString() + ")" : "";
+				ul.prepend(t_content);
+				lastEvent = msg;
+				//console.log(msg,lastMsg);
+			}
+			countMessage(msg.event);
+		};
+
+		const run = async () => {
+			const queryString = window.location.search;
+			const urlParams = new URLSearchParams(queryString);
+			// Parse channel parameter
+			if(urlParams.has('channel')) {
+				channel = urlParams.get('channel');
+			}
+			if(urlParams.has('username') && urlParams.has('token')) {
+				username = urlParams.get('username');
+				token = urlParams.get('token');
+			}
+			const chat = new Chat({
+				token,
+				username,
+				log: { level: "warn" }
+			});
+			
+
+			chat.on("*", (message) => {
+				handleMessage(message);
+			});
+
+			await chat.connect();
+			await chat.join(channel);
+			document.getElementById("channelname").value=channel;
+			return chat;
+		};
+		const chatobj = run();
+
+		function changeChannel(obj) {
+			document.location = document.location.pathname + "?channel="+encodeURI(obj.value);
+		}
+		function sec2time(seconds){
+			let hours = Math.floor( seconds / 3600 );
+			let minutes = Math.floor( (seconds%3600) / 60 );
+			seconds = Math.floor( seconds%60 );
+			let result = "";
+			if(hours>0) result += hours + " Stunde" + (hours>1 ? "n" : "")
+			if(result!="" && minutes>0) result += ", "
+			if(minutes>0) result += minutes + " Minute" + (minutes>1 ? "n" : "")
+			if(result!="" && seconds>0) result += ", "
+			if(seconds>0) result += seconds + " Sekunde" + (seconds!=1 ? "n" : "")
+			return result;
+		}
+		</script>
+	</head>
+	<body>
+		<div id="stats">
+			<span class="description">Channel:</span> <input type="text" id="channelname" value="" onchange="changeChannel(this)" /><br />
+			<span class="description">Nachrichten:</span> <span id="messages">0</span><br />
+			<span class="description">davon gelöscht:</span> <span id="deleted">0</span><br />
+			<span class="description">timeouted Users:</span> <span id="timeout">0</span><br />
+			<span class="description">gebannte Users:</span> <span id="banned">0</span>
+		</div>
+		<ul id="messageList">
+		</ul>
+		<template id="template_clearmsg">
+			<li><span class="username"></span>: <span class="message"></span> <span class="timestamp"></span></li>
+		</template>
+		<template id="template_banmsg">
+			<li><span class="username"></span>: timeout/ban für <span class="timeout"></span> <span class="timestamp"></span><br />
+			letzte Nachricht: <span class="message"></span> <span class="timestamp2"></span></li>
+		</template>
+	</body>
+</html>
